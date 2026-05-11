@@ -11,7 +11,7 @@
             box-sizing: border-box;
         }
 
-        /* 密码锁遮罩层样式（验证通过前显示） */
+        /* 密码锁遮罩层样式 */
         .lock-screen {
             position: fixed;
             top: 0;
@@ -33,7 +33,7 @@
             text-align: center;
             box-shadow: 0 25px 40px -12px rgba(0,0,0,0.2);
             width: 90%;
-            max-width: 380px;
+            max-width: 400px;
             border: 1px solid #ffe2cb;
         }
 
@@ -45,7 +45,7 @@
 
         .lock-card p {
             color: #c9824c;
-            margin-bottom: 1.8rem;
+            margin-bottom: 1rem;
             font-size: 0.9rem;
         }
 
@@ -85,6 +85,11 @@
             transform: scale(0.98);
         }
 
+        .lock-card button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
         .error-msg {
             color: #d9534f;
             font-size: 0.8rem;
@@ -92,12 +97,29 @@
             display: none;
         }
 
-        /* 正常网站内容（初始隐藏） */
+        .wait-timer {
+            color: #e7ac78;
+            font-size: 0.85rem;
+            margin-top: 0.6rem;
+            display: none;
+        }
+
+        .admin-link {
+            margin-top: 1rem;
+            font-size: 0.7rem;
+        }
+
+        .admin-link a {
+            color: #c9824c;
+            text-decoration: none;
+        }
+
+        /* 正常网站内容 */
         .website-content {
             display: none;
         }
 
-        /* 以下是原有样式保持不变 */
+        /* 原有样式保持不变 */
         body {
             font-family: system-ui, -apple-system, 'Segoe UI', 'Roboto', sans-serif;
             background: #fffaf5;
@@ -278,18 +300,20 @@
 </head>
 <body>
 
-<!-- 密码锁界面（验证通过前显示） -->
+<!-- 密码锁界面 -->
 <div id="lockScreen" class="lock-screen">
     <div class="lock-card">
         <h2>🔐 2402的小窝</h2>
-        <p>请输入访问密码</p>
-        <input type="password" id="passwordInput" placeholder="密码" autofocus>
+        <p id="lockMessage">请输入访问密码</p>
+        <input type="password" id="passwordInput" placeholder="密码" autocomplete="off">
         <button id="unlockBtn">进入小窝 ✨</button>
-        <div id="errorMsg" class="error-msg">❌ 密码错误，再试试看～</div>
+        <div id="errorMsg" class="error-msg">❌ 密码错误</div>
+        <div id="waitTimer" class="wait-timer">请等待 <span id="waitSeconds">0</span> 秒后重试</div>
+        <div class="admin-link"><a href="javascript:void(0)" id="adminToolBtn">🔧 管理员工具</a></div>
     </div>
 </div>
 
-<!-- 正常网站内容（初始隐藏） -->
+<!-- 正常网站内容 -->
 <div id="websiteContent" class="website-content">
     <div class="container">
         <div class="navbar">
@@ -314,39 +338,109 @@
 </div>
 
 <script>
-    // ========= 访问密码配置 =========
-    // 🔐 在这里修改你的密码（建议使用数字/字母组合，不要用特殊字符）
-    const SITE_PASSWORD = "2402";  // 你可以改成其他密码
+    // ==================== 加密密码配置 ====================
+    // 真实密码: 2402
+    // 加密方式: Base64 编码
+    // 如果要修改密码，用下方的 encodePassword() 工具生成新密文填到这里
+    const ENCRYPTED_PASSWORD = "MjQwMg==";  // "2402" 的 Base64 编码
     
-    // 页面内嵌板块数据
-    const mainBlocks = [
-        {
-            id: 1,
-            title: "🍃 少年游 · 我们的第一篇纪念",
-            subText: "点击翻开班级青春手札，珍藏温暖瞬间",
-            link: "article.html",
-            emoji: "📖"
+    // 解码函数
+    function decodePassword(encrypted) {
+        try {
+            return atob(encrypted);
+        } catch(e) {
+            return "";
         }
-    ];
-
-    // 验证密码逻辑
-    function verifyPassword(inputPwd) {
-        return inputPwd === SITE_PASSWORD;
     }
-
-    // 解锁网站
+    
+    // 验证密码
+    function verifyPassword(inputPwd) {
+        const realPwd = decodePassword(ENCRYPTED_PASSWORD);
+        return inputPwd === realPwd;
+    }
+    
+    // ==================== 等待机制 ====================
+    let failCount = 0;           // 连续失败次数（正确输入后重置）
+    let isWaiting = false;       // 是否在等待中
+    let waitTimerInterval = null;
+    
+    function startWaiting(callback) {
+        if (isWaiting) return;
+        
+        // 计算等待时间：3秒, 6秒, 12秒, 24秒... (最多60秒)
+        let waitTime = Math.min(3 * Math.pow(2, failCount - 1), 60);
+        isWaiting = true;
+        
+        const lockMessage = document.getElementById('lockMessage');
+        const errorMsg = document.getElementById('errorMsg');
+        const waitTimerDiv = document.getElementById('waitTimer');
+        const waitSecondsSpan = document.getElementById('waitSeconds');
+        const unlockBtn = document.getElementById('unlockBtn');
+        const passwordInput = document.getElementById('passwordInput');
+        
+        // 禁用输入和按钮
+        passwordInput.disabled = true;
+        unlockBtn.disabled = true;
+        lockMessage.innerHTML = `⚠️ 密码错误 ${failCount} 次，请等待 ${waitTime} 秒后再试`;
+        errorMsg.style.display = 'none';
+        waitTimerDiv.style.display = 'block';
+        
+        let remaining = waitTime;
+        waitSecondsSpan.textContent = remaining;
+        
+        waitTimerInterval = setInterval(() => {
+            remaining--;
+            waitSecondsSpan.textContent = remaining;
+            
+            if (remaining <= 0) {
+                clearInterval(waitTimerInterval);
+                waitTimerInterval = null;
+                // 恢复
+                passwordInput.disabled = false;
+                unlockBtn.disabled = false;
+                passwordInput.value = '';
+                passwordInput.focus();
+                lockMessage.innerHTML = '请输入访问密码';
+                waitTimerDiv.style.display = 'none';
+                isWaiting = false;
+                if (callback) callback();
+            }
+        }, 1000);
+    }
+    
+    function resetFailCount() {
+        failCount = 0;
+        if (waitTimerInterval) {
+            clearInterval(waitTimerInterval);
+            waitTimerInterval = null;
+        }
+        isWaiting = false;
+        // 恢复界面状态
+        const passwordInput = document.getElementById('passwordInput');
+        const unlockBtn = document.getElementById('unlockBtn');
+        const lockMessage = document.getElementById('lockMessage');
+        const waitTimerDiv = document.getElementById('waitTimer');
+        if (passwordInput) passwordInput.disabled = false;
+        if (unlockBtn) unlockBtn.disabled = false;
+        if (lockMessage) lockMessage.innerHTML = '请输入访问密码';
+        if (waitTimerDiv) waitTimerDiv.style.display = 'none';
+    }
+    
+    // 解锁成功
     function unlockSite() {
+        resetFailCount();  // 成功时重置失败计数
         document.getElementById('lockScreen').style.opacity = '0';
         setTimeout(() => {
             document.getElementById('lockScreen').style.display = 'none';
             document.getElementById('websiteContent').style.display = 'block';
         }, 500);
-        // 记录已验证状态到 sessionStorage（刷新页面后不需要重复输入）
         sessionStorage.setItem('siteUnlocked', 'true');
     }
-
+    
     // 处理密码输入
     function handleUnlock() {
+        if (isWaiting) return;
+        
         const inputEl = document.getElementById('passwordInput');
         const errorEl = document.getElementById('errorMsg');
         const pwd = inputEl.value;
@@ -355,23 +449,255 @@
             errorEl.style.display = 'none';
             unlockSite();
         } else {
+            failCount++;
             errorEl.style.display = 'block';
             inputEl.value = '';
-            inputEl.focus();
+            
+            // 启动等待机制（第1次错就开始等，等待时间递增）
+            startWaiting();
         }
     }
-
-    // 检查是否已经解锁过（刷新页面后自动通过）
+    
+    // 检查是否已经解锁过
     function checkAlreadyUnlocked() {
         if (sessionStorage.getItem('siteUnlocked') === 'true') {
             unlockSite();
         }
     }
+    
+    // 管理员工具入口（打开新窗口验证独立密码）
+    function openAdminTool() {
+        // 打开一个新窗口，内容由后面的 HTML 生成
+        const adminWindow = window.open('', '_blank', 'width=500,height=600,toolbar=no,menubar=no');
+        adminWindow.document.write(getAdminToolHTML());
+        adminWindow.document.close();
+    }
+    
+    // 生成管理员工具页面 HTML（内嵌）
+    function getAdminToolHTML() {
+        return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员工具 · 密码转换器</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #fef7ef 0%, #fff0e0 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 2rem;
+            padding: 2rem;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 25px 40px -12px rgba(0,0,0,0.2);
+            border: 1px solid #ffe2cb;
+        }
+        h1 { color: #bc632f; margin-bottom: 1rem; font-size: 1.5rem; }
+        h2 { color: #c9824c; margin: 1.5rem 0 0.5rem; font-size: 1.2rem; }
+        input, textarea {
+            width: 100%;
+            padding: 0.8rem;
+            border: 2px solid #ffdfc4;
+            border-radius: 1rem;
+            font-size: 1rem;
+            margin: 0.5rem 0;
+            resize: vertical;
+        }
+        button {
+            background: #e7ac78;
+            border: none;
+            padding: 0.7rem 1.5rem;
+            border-radius: 2rem;
+            font-size: 1rem;
+            font-weight: 600;
+            color: white;
+            cursor: pointer;
+            margin: 0.5rem 0.5rem 0 0;
+        }
+        button:hover { background: #bc632f; }
+        .result {
+            background: #f7e2cf;
+            padding: 1rem;
+            border-radius: 1rem;
+            margin: 1rem 0;
+            word-break: break-all;
+            font-family: monospace;
+        }
+        .note {
+            font-size: 0.8rem;
+            color: #b98258;
+            margin-top: 1rem;
+        }
+        hr { margin: 1rem 0; border: none; border-top: 1px solid #ffdfc4; }
+        .lock-area {
+            background: #fff3e6;
+            padding: 1rem;
+            border-radius: 1rem;
+            margin-bottom: 1rem;
+        }
+        .error { color: #d9534f; font-size: 0.8rem; margin-top: 0.5rem; display: none; }
+        .wait-timer { color: #e7ac78; font-size: 0.85rem; margin-top: 0.5rem; display: none; }
+    </style>
+</head>
+<body>
+<div class="container" id="mainContainer">
+    <h1>🔧 管理员工具</h1>
+    <p>本工具用于生成加密密码，方便修改网站访问密码。</p>
+    
+    <div id="authArea" class="lock-area">
+        <h2>🔐 身份验证</h2>
+        <p>请输入管理员密码以使用工具</p>
+        <input type="password" id="adminPwdInput" placeholder="管理员密码" autocomplete="off">
+        <button id="verifyAdminBtn">验证身份</button>
+        <div id="adminError" class="error">❌ 密码错误</div>
+        <div id="adminWaitTimer" class="wait-timer">请等待 <span id="adminWaitSeconds">0</span> 秒后重试</div>
+    </div>
+    
+    <div id="toolArea" style="display: none;">
+        <h2>📝 密码加密工具</h2>
+        <p>输入明文密码，点击加密：</p>
+        <input type="text" id="plainPwd" placeholder="例如: 2402">
+        <button id="encodeBtn">🔐 加密</button>
+        <div class="result">
+            <strong>加密结果（Base64）：</strong><br>
+            <span id="encodedResult"></span>
+        </div>
+        <div class="note">
+            💡 将上面加密结果复制，替换 index.html 中的 <code>ENCRYPTED_PASSWORD</code> 变量值即可。
+        </div>
+        <hr>
+        <h2>⚙️ 当前配置参考</h2>
+        <div class="result">
+            <strong>当前网站密码（密文）：</strong><br>
+            <code id="currentEncrypted"></code>
+        </div>
+        <button id="copyBtn">📋 复制密文</button>
+    </div>
+</div>
 
-    // 渲染首页板块（原有逻辑）
+<script>
+    // 管理员工具独立密码: Lzc18008405178 (加密存储)
+    const ADMIN_ENCRYPTED = "THpjMTgwMDg0MDUxNzg=";  // "Lzc18008405178" 的 Base64
+    function decodeAdminPwd(enc) { try { return atob(enc); } catch(e) { return ""; } }
+    function verifyAdminPwd(input) { return input === decodeAdminPwd(ADMIN_ENCRYPTED); }
+    
+    // 等待机制（独立于主页）
+    let adminFailCount = 0;
+    let adminIsWaiting = false;
+    let adminTimerInterval = null;
+    
+    function startAdminWaiting() {
+        if (adminIsWaiting) return;
+        let waitTime = Math.min(3 * Math.pow(2, adminFailCount - 1), 60);
+        adminIsWaiting = true;
+        const verifyBtn = document.getElementById('verifyAdminBtn');
+        const pwdInput = document.getElementById('adminPwdInput');
+        const errorDiv = document.getElementById('adminError');
+        const waitDiv = document.getElementById('adminWaitTimer');
+        const waitSpan = document.getElementById('adminWaitSeconds');
+        
+        pwdInput.disabled = true;
+        verifyBtn.disabled = true;
+        errorDiv.style.display = 'none';
+        waitDiv.style.display = 'block';
+        
+        let remaining = waitTime;
+        waitSpan.textContent = remaining;
+        
+        adminTimerInterval = setInterval(() => {
+            remaining--;
+            waitSpan.textContent = remaining;
+            if (remaining <= 0) {
+                clearInterval(adminTimerInterval);
+                adminTimerInterval = null;
+                pwdInput.disabled = false;
+                verifyBtn.disabled = false;
+                pwdInput.value = '';
+                pwdInput.focus();
+                waitDiv.style.display = 'none';
+                adminIsWaiting = false;
+            }
+        }, 1000);
+    }
+    
+    function resetAdminWait() {
+        adminFailCount = 0;
+        if (adminTimerInterval) clearInterval(adminTimerInterval);
+        adminIsWaiting = false;
+        const pwdInput = document.getElementById('adminPwdInput');
+        const verifyBtn = document.getElementById('verifyAdminBtn');
+        if (pwdInput) pwdInput.disabled = false;
+        if (verifyBtn) verifyBtn.disabled = false;
+        const waitDiv = document.getElementById('adminWaitTimer');
+        if (waitDiv) waitDiv.style.display = 'none';
+    }
+    
+    document.getElementById('verifyAdminBtn').addEventListener('click', () => {
+        if (adminIsWaiting) return;
+        const inputPwd = document.getElementById('adminPwdInput').value;
+        const errorDiv = document.getElementById('adminError');
+        if (verifyAdminPwd(inputPwd)) {
+            errorDiv.style.display = 'none';
+            resetAdminWait();
+            document.getElementById('authArea').style.display = 'none';
+            document.getElementById('toolArea').style.display = 'block';
+            // 显示当前加密密码
+            const mainPwdEncrypted = "MjQwMg==";
+            document.getElementById('currentEncrypted').textContent = mainPwdEncrypted;
+        } else {
+            adminFailCount++;
+            errorDiv.style.display = 'block';
+            document.getElementById('adminPwdInput').value = '';
+            startAdminWaiting();
+        }
+    });
+    
+    document.getElementById('encodeBtn').addEventListener('click', () => {
+        const plain = document.getElementById('plainPwd').value;
+        if (!plain) {
+            alert('请输入要加密的密码');
+            return;
+        }
+        const encoded = btoa(plain);
+        document.getElementById('encodedResult').textContent = encoded;
+    });
+    
+    document.getElementById('copyBtn').addEventListener('click', () => {
+        const text = document.getElementById('currentEncrypted').textContent;
+        navigator.clipboard.writeText(text).then(() => alert('已复制密文'));
+    });
+    
+    // 回车键验证
+    document.getElementById('adminPwdInput').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') document.getElementById('verifyAdminBtn').click();
+    });
+</script>
+</body>
+</html>`;
+    }
+    
+    // 渲染首页板块
     function renderHomeBlocks() {
         const grid = document.getElementById("mainGrid");
         if (!grid) return;
+        const mainBlocks = [
+            {
+                id: 1,
+                title: "🍃 少年游 · 我们的第一篇纪念",
+                subText: "点击翻开班级青春手札，珍藏温暖瞬间",
+                link: "article.html",
+                emoji: "📖"
+            }
+        ];
         if (mainBlocks.length === 0) {
             grid.innerHTML = '<div style="text-align:center; grid-column:1/-1;">✨ 即将解锁更多板块 ✨</div>';
             return;
@@ -399,38 +725,27 @@
                     if (e.target.closest('.card-link')) e.stopPropagation();
                     window.location.href = link;
                 });
-                const innerBtn = card.querySelector('.card-link');
-                if (innerBtn) {
-                    innerBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        window.location.href = link;
-                    });
-                }
             }
         });
     }
-
+    
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m] || m));
     }
-
-    // 绑定回车键和按钮事件
-    function bindUnlockEvents() {
-        const inputEl = document.getElementById('passwordInput');
-        const btnEl = document.getElementById('unlockBtn');
-        
-        btnEl.addEventListener('click', handleUnlock);
-        inputEl.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                handleUnlock();
-            }
+    
+    // 绑定事件
+    function bindEvents() {
+        document.getElementById('unlockBtn').addEventListener('click', handleUnlock);
+        document.getElementById('passwordInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleUnlock();
         });
+        document.getElementById('adminToolBtn').addEventListener('click', openAdminTool);
     }
-
+    
     // 初始化
     checkAlreadyUnlocked();
-    bindUnlockEvents();
+    bindEvents();
     renderHomeBlocks();
 </script>
 </body>
