@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2402的资源 · 班级共享站</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            background: #fef7ef;
+            color: #2d2a24;
+        }
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 1.5rem 1.8rem 2.5rem;
+        }
+        .navbar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            background: white;
+            padding: 0.7rem 1.8rem;
+            border-radius: 3rem;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+            margin-bottom: 2rem;
+            border: 1px solid #ffdfc4;
+        }
+        .logo-area {
+            display: flex;
+            align-items: baseline;
+            gap: 0.8rem;
+        }
+        .page-title {
+            font-size: 1.6rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #bd602e, #ec873a);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+        .back-home {
+            background: #f4e0ce;
+            padding: 0.4rem 1.2rem;
+            border-radius: 2rem;
+            text-decoration: none;
+            font-weight: 600;
+            color: #bc632f;
+            font-size: 0.9rem;
+        }
+        .hero {
+            text-align: center;
+            margin-bottom: 1.8rem;
+        }
+        .hero h2 {
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: #ab562a;
+        }
+        .hero p {
+            color: #c9824c;
+        }
+        /* 扩展资源卡片网格 */
+        .resources-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 2rem;
+            margin: 2rem 0 3rem;
+        }
+        .resource-card {
+            background: white;
+            border-radius: 1.8rem;
+            transition: 0.2s;
+            border: 1px solid #ffe2cb;
+            box-shadow: 0 12px 20px -12px rgba(0,0,0,0.08);
+            display: flex;
+            flex-direction: column;
+        }
+        .resource-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 22px 28px -14px rgba(150, 70, 10, 0.15);
+            border-color: #ffca97;
+        }
+        .card-content {
+            padding: 1.6rem 1.5rem 1rem;
+        }
+        .res-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .res-sub {
+            font-size: 0.85rem;
+            background: #fff3e6;
+            display: inline-block;
+            padding: 0.2rem 1rem;
+            border-radius: 30px;
+            color: #c2682c;
+            margin: 0.5rem 0;
+        }
+        .res-note {
+            color: #a97144;
+            font-size: 0.8rem;
+            margin-top: 6px;
+        }
+        .card-footer {
+            padding: 0.8rem 1.5rem 1.5rem;
+            border-top: 1px solid #fae9db;
+        }
+        .resource-link {
+            background: #f7e2cf;
+            display: inline-block;
+            padding: 0.5rem 1.3rem;
+            border-radius: 3rem;
+            text-decoration: none;
+            font-weight: 500;
+            color: #c05f28;
+            font-size: 0.85rem;
+        }
+        .resource-link:hover {
+            background: #e7ac78;
+            color: white;
+        }
+        .footer-note {
+            text-align: center;
+            margin-top: 2rem;
+            color: #b98258;
+            font-size: 0.8rem;
+            border-top: 1px dashed #f6dbbc;
+            padding-top: 1.5rem;
+        }
+        @media (max-width: 680px) {
+            .container {
+                padding: 1rem;
+            }
+            .navbar {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="navbar">
+        <div class="logo-area">
+            <span class="page-title">📚 2402的资源</span>
+            <span style="font-size:0.75rem; background:#fbeddf; padding:0 0.6rem; border-radius:40px;">自信二班 · 永创辉煌</span>
+        </div>
+        <a href="index.html" class="back-home">🏠 返回小窝</a>
+    </div>
+
+    <div class="hero">
+        <h2>✨ 班级专属资料库 ✨</h2>
+        <p>课件 · 班歌 · 回忆｜扩展性模块，持续更新</p>
+    </div>
+
+    <!-- 高扩展性资源板块（可无限添加新条目） -->
+    <div class="resources-grid" id="resourceGrid"></div>
+
+    <div class="footer-note">
+        📌 点击卡片即可跳转资源链接 · 永久有效
+    </div>
+</div>
+
+<script>
+    // ========= 资源库配置 (可扩展板块) ==========
+    // 每一项：标题，小字(密码/说明)，外部链接，可选图标
+    const resourceItems = [
+        {
+            id: 1,
+            title: "🎵 C2402班歌MV资源",
+            subText: "密码：2402",
+            note: "我们的班歌，青春唱响",
+            url: "https://wwben.lanzoul.com/b016ksp31g",
+            external: true
+        }
+        // 后续增加新资源只需往下添加对象：
+        // { id: 2, title: "📖 数学期末复习包", subText: "无密码", note: "讲义+习题", url: "https://example.com/xxx", external: true }
+    ];
+
+    function renderResources() {
+        const grid = document.getElementById("resourceGrid");
+        if (!grid) return;
+        if (resourceItems.length === 0) {
+            grid.innerHTML = '<div style="text-align:center; grid-column:1/-1;">🎈 更多资源准备中，敬请期待～</div>';
+            return;
+        }
+        let html = '';
+        for (let item of resourceItems) {
+            html += `
+                <div class="resource-card" data-url="${item.url}">
+                <button onclick="navigator.clipboard.writeText('2402'); alert('密码已复制，请粘贴')">📋 复制密码</button>
+                    <div class="card-content">
+                        <div class="res-title">${escapeHtml(item.title)}</div>
+                        <div class="res-sub">🔑 ${escapeHtml(item.subText)}</div>
+                        <div class="res-note">📎 ${escapeHtml(item.note || '班级内部资源')}</div>
+                    </div>
+                    <div class="card-footer">
+                        <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="resource-link">🔗 立即跳转 →</a>
+                    </div>
+                </div>
+            `;
+        }
+        grid.innerHTML = html;
+
+        // 同时支持卡片任意位置点击跳转（提高体验，但不干扰已有链接）
+        document.querySelectorAll('.resource-card').forEach(card => {
+            const url = card.getAttribute('data-url');
+            if (url) {
+                card.style.cursor = 'pointer';
+                card.addEventListener('click', (e) => {
+                    if (e.target.closest('.resource-link')) return;
+                    window.open(url, '_blank');
+                });
+            }
+        });
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+    }
+
+    renderResources();
+</script>
+</body>
+</html>

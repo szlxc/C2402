@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2402的小窝 · 自信二班 永创辉煌</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', 'Roboto', sans-serif;
+            background: #fffaf5;
+            background-image: radial-gradient(circle at 10% 20%, rgba(255, 235, 215, 0.5) 0%, #fff6ed 90%);
+            color: #2c2c2c;
+        }
+
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 1.5rem 1.8rem 2.5rem;
+        }
+
+        /* 导航栏 */
+        .navbar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            background: white;
+            padding: 0.7rem 1.8rem;
+            border-radius: 3rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+            margin-bottom: 2rem;
+            border: 1px solid #ffe1cd;
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: baseline;
+            gap: 0.8rem;
+            flex-wrap: wrap;
+        }
+
+        .site-name {
+            font-size: 1.7rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #b9572c, #e68a3c);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        .slogan-badge {
+            background: #fde7d4;
+            padding: 0.2rem 0.9rem;
+            border-radius: 40px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #b45a2c;
+        }
+
+        .nav-btn {
+            background: #f7e3cf;
+            border: none;
+            padding: 0.5rem 1.3rem;
+            border-radius: 2rem;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #bc632f;
+            cursor: pointer;
+            transition: 0.2s;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .nav-btn:hover {
+            background: #e9b47e;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        /* 班级口号专区 */
+        .hero {
+            text-align: center;
+            margin: 1rem 0 2rem;
+        }
+
+        .hero h1 {
+            font-size: 2.3rem;
+            letter-spacing: 2px;
+            background: linear-gradient(120deg, #b24e22, #e27c36);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            font-weight: 800;
+        }
+
+        .hero p {
+            color: #c47a44;
+            font-size: 0.9rem;
+            margin-top: 8px;
+        }
+
+        /* 可扩展板块网格 */
+        .extendable-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 2rem;
+            margin: 2.8rem 0 3rem;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 1.8rem;
+            transition: all 0.25s ease;
+            box-shadow: 0 15px 30px -12px rgba(0, 0, 0, 0.1);
+            border: 1px solid #ffe1c2;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card:hover {
+            transform: translateY(-6px);
+            box-shadow: 0 25px 35px -12px rgba(180, 80, 20, 0.2);
+            border-color: #ffcf9a;
+        }
+
+        .card-content {
+            padding: 1.8rem 1.5rem 1.2rem;
+            flex: 1;
+        }
+
+        .card-title {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #2d3e2b;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .card-sub {
+            font-size: 0.9rem;
+            color: #b6733c;
+            border-left: 3px solid #f9bc7c;
+            padding-left: 12px;
+            margin: 0.8rem 0 1rem;
+        }
+
+        .card-footer {
+            padding: 1rem 1.5rem 1.5rem;
+            border-top: 1px solid #fde9dc;
+        }
+
+        .card-link {
+            background: #f7e2cf;
+            display: inline-block;
+            padding: 0.5rem 1.2rem;
+            border-radius: 3rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-decoration: none;
+            color: #c4622a;
+        }
+
+        .footer-note {
+            text-align: center;
+            margin-top: 2rem;
+            font-size: 0.8rem;
+            color: #b3865f;
+            border-top: 1px dashed #f2d5b5;
+            padding-top: 1.8rem;
+        }
+
+        @media (max-width: 680px) {
+            .container {
+                padding: 1rem;
+            }
+            .navbar {
+                flex-direction: column;
+                gap: 12px;
+                text-align: center;
+            }
+            .hero h1 {
+                font-size: 1.6rem;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="navbar">
+        <div class="logo-area">
+            <span class="site-name">🏡 2402的小窝</span>
+            <span class="slogan-badge">自信二班 · 永创辉煌</span>
+        </div>
+        <a href="resources.html" class="nav-btn">📦 2402资源 →</a>
+    </div>
+
+    <div class="hero">
+        <h1>✨ 自信二班  永创辉煌 ✨</h1>
+        <p>最好的时光，是和你一起成长</p>
+    </div>
+
+    <!-- 可扩展板块：主体 + 小字说明，点击进入文章页（示例） -->
+    <div class="extendable-grid" id="mainGrid"></div>
+
+    <div class="footer-note">
+        🌟 每一份回忆都闪闪发光 | 2402班集体
+    </div>
+</div>
+
+<script>
+    // ========= 可扩展板块配置（未来增加新模块只需在这里添加对象） =========
+    const mainBlocks = [
+        {
+            id: 1,
+            title: "🍃 少年游 · 我们的第一篇纪念",
+            subText: "点击翻开班级青春手札，珍藏温暖瞬间",
+            link: "article.html",
+            emoji: "📖"
+        }
+        // 后续可继续添加，例如：
+        // { id: 2, title: "🏆 运动会热血时刻", subText: "为拼搏喝彩", link: "sports.html" }
+    ];
+
+    function renderHomeBlocks() {
+        const grid = document.getElementById("mainGrid");
+        if (!grid) return;
+        if (mainBlocks.length === 0) {
+            grid.innerHTML = '<div style="text-align:center; grid-column:1/-1;">✨ 即将解锁更多板块 ✨</div>';
+            return;
+        }
+        let html = '';
+        for (let block of mainBlocks) {
+            html += `
+                <div class="card" data-link="${block.link}">
+                    <div class="card-content">
+                        <div class="card-title">${block.emoji ? block.emoji + ' ' : ''}${escapeHtml(block.title)}</div>
+                        <div class="card-sub">💬 ${escapeHtml(block.subText)}</div>
+                    </div>
+                    <div class="card-footer">
+                        <span class="card-link">👉 进入阅读 →</span>
+                    </div>
+                </div>
+            `;
+        }
+        grid.innerHTML = html;
+        // 绑定点击卡片跳转
+        document.querySelectorAll('.card').forEach(card => {
+            const link = card.getAttribute('data-link');
+            if (link) {
+                card.addEventListener('click', (e) => {
+                    if (e.target.closest('.card-link')) e.stopPropagation();
+                    window.location.href = link;
+                });
+                const innerBtn = card.querySelector('.card-link');
+                if (innerBtn) {
+                    innerBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        window.location.href = link;
+                    });
+                }
+            }
+        });
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m] || m));
+    }
+
+    renderHomeBlocks();
+</script>
+</body>
+</html>
