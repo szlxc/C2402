@@ -66,7 +66,6 @@
         .hero p {
             color: #c9824c;
         }
-        /* 扩展资源卡片网格 */
         .resources-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -89,6 +88,7 @@
         }
         .card-content {
             padding: 1.6rem 1.5rem 1rem;
+            flex: 1;
         }
         .res-title {
             font-size: 1.5rem;
@@ -111,6 +111,25 @@
             color: #a97144;
             font-size: 0.8rem;
             margin-top: 6px;
+        }
+        .copy-pwd-btn {
+            background: #f0cfb3;
+            border: none;
+            padding: 0.3rem 1rem;
+            border-radius: 2rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            margin-top: 12px;
+            transition: 0.2s;
+            color: #9b4a1a;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .copy-pwd-btn:hover {
+            background: #e7ac78;
+            color: white;
         }
         .card-footer {
             padding: 0.8rem 1.5rem 1.5rem;
@@ -164,7 +183,6 @@
         <p>课件 · 班歌 · 回忆｜扩展性模块，持续更新</p>
     </div>
 
-    <!-- 高扩展性资源板块（可无限添加新条目） -->
     <div class="resources-grid" id="resourceGrid"></div>
 
     <div class="footer-note">
@@ -173,20 +191,51 @@
 </div>
 
 <script>
-    // ========= 资源库配置 (可扩展板块) ==========
-    // 每一项：标题，小字(密码/说明)，外部链接，可选图标
+    // ========= 资源库配置（高扩展性格式） =========
+    // 每一个资源卡片，subText 里写“密码：xxxx”格式，会自动提取并生成复制密码按钮
     const resourceItems = [
         {
             id: 1,
-            title: "🎵 C2402班歌MV资源",
+            title: "🎵 C2402班歌MV",
             subText: "密码：2402",
             note: "我们的班歌，青春唱响",
             url: "https://wwben.lanzoul.com/b016ksp31g",
             external: true
         }
-        // 后续增加新资源只需往下添加对象：
-        // { id: 2, title: "📖 数学期末复习包", subText: "无密码", note: "讲义+习题", url: "https://example.com/xxx", external: true }
+        // ✅ 以后要加新资源，直接在这里按相同格式添加对象即可，复制密码按钮自动生成
+        // 示例：
+        // {
+        //     id: 2,
+        //     title: "📖 数学期末复习包",
+        //     subText: "密码：2402",
+        //     note: "讲义+习题合集",
+        //     url: "https://你的蓝奏云链接",
+        //     external: true
+        // }
     ];
+
+    // 从 subText 字符串中提取密码（例如“密码：2402” → “2402”）
+    function extractPassword(subText) {
+        if (!subText) return null;
+        // 匹配 密码：xxxx 或 密码:xxxx 格式，xxxx 可以是数字/字母
+        const match = subText.match(/密码[：:]\s*(\w+)/);
+        return match ? match[1] : null;
+    }
+
+    // 复制密码函数（带友好提示）
+    function copyPassword(pwd, event) {
+        if (event) event.stopPropagation();
+        navigator.clipboard.writeText(pwd).then(() => {
+            alert(`✅ 密码“${pwd}”已复制，打开资源页面后直接粘贴即可`);
+        }).catch(() => {
+            alert(`❌ 复制失败，请手动输入密码：${pwd}`);
+        });
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+    }
 
     function renderResources() {
         const grid = document.getElementById("resourceGrid");
@@ -197,13 +246,19 @@
         }
         let html = '';
         for (let item of resourceItems) {
+            const password = extractPassword(item.subText);
+            const copyBtnHtml = password ? `
+                <button class="copy-pwd-btn" onclick="copyPassword('${escapeHtml(password)}', event)">
+                    📋 复制密码
+                </button>
+            ` : '';
             html += `
                 <div class="resource-card" data-url="${item.url}">
-                <button onclick="navigator.clipboard.writeText('2402'); alert('密码已复制，请粘贴')">📋 复制密码</button>
                     <div class="card-content">
                         <div class="res-title">${escapeHtml(item.title)}</div>
                         <div class="res-sub">🔑 ${escapeHtml(item.subText)}</div>
                         <div class="res-note">📎 ${escapeHtml(item.note || '班级内部资源')}</div>
+                        ${copyBtnHtml}
                     </div>
                     <div class="card-footer">
                         <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="resource-link">🔗 立即跳转 →</a>
@@ -213,22 +268,17 @@
         }
         grid.innerHTML = html;
 
-        // 同时支持卡片任意位置点击跳转（提高体验，但不干扰已有链接）
+        // 卡片整体点击跳转（保留原有逻辑，且不与按钮冲突）
         document.querySelectorAll('.resource-card').forEach(card => {
             const url = card.getAttribute('data-url');
             if (url) {
                 card.style.cursor = 'pointer';
                 card.addEventListener('click', (e) => {
-                    if (e.target.closest('.resource-link')) return;
+                    if (e.target.closest('.resource-link') || e.target.closest('.copy-pwd-btn')) return;
                     window.open(url, '_blank');
                 });
             }
         });
-    }
-
-    function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
     }
 
     renderResources();
