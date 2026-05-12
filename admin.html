@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员工具 · 密码转换器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* 密码锁遮罩层样式（验证通过前显示） */
+        .lock-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #fef7ef 0%, #fff0e0 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            transition: opacity 0.5s ease;
+        }
+
+        .lock-card {
+            background: white;
+            border-radius: 2rem;
+            padding: 2.5rem 2rem;
+            text-align: center;
+            box-shadow: 0 25px 40px -12px rgba(0,0,0,0.2);
+            width: 90%;
+            max-width: 380px;
+            border: 1px solid #ffe2cb;
+        }
+
+        .lock-card h2 {
+            font-size: 1.8rem;
+            color: #bc632f;
+            margin-bottom: 0.5rem;
+        }
+
+        .lock-card p {
+            color: #c9824c;
+            margin-bottom: 1.8rem;
+            font-size: 0.9rem;
+        }
+
+        .lock-card input {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            font-size: 1.2rem;
+            text-align: center;
+            border: 2px solid #ffdfc4;
+            border-radius: 3rem;
+            outline: none;
+            background: #fffef7;
+            margin-bottom: 1rem;
+            font-family: monospace;
+            letter-spacing: 2px;
+        }
+
+        .lock-card input:focus {
+            border-color: #e7ac78;
+        }
+
+        .lock-card button {
+            background: #e7ac78;
+            border: none;
+            padding: 0.7rem 1.8rem;
+            border-radius: 3rem;
+            font-size: 1rem;
+            font-weight: 600;
+            color: white;
+            cursor: pointer;
+            transition: 0.2s;
+            width: 100%;
+        }
+
+        .lock-card button:hover {
+            background: #bc632f;
+            transform: scale(0.98);
+        }
+
+        .error-msg {
+            color: #d9534f;
+            font-size: 0.8rem;
+            margin-top: 0.8rem;
+            display: none;
+        }
+
+        /* 管理员工具主体（初始隐藏） */
+        .admin-content {
+            display: none;
+        }
+
+        /* 主体样式 */
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', 'Roboto', sans-serif;
+            background: #fffaf5;
+            background-image: radial-gradient(circle at 10% 20%, rgba(255, 235, 215, 0.5) 0%, #fff6ed 90%);
+            color: #2c2c2c;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        .navbar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            background: white;
+            padding: 0.7rem 1.8rem;
+            border-radius: 3rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+            margin-bottom: 2rem;
+            border: 1px solid #ffe1cd;
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: baseline;
+            gap: 0.8rem;
+            flex-wrap: wrap;
+        }
+
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #b9572c, #e68a3c);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        .back-home {
+            background: #f4e0ce;
+            padding: 0.4rem 1.2rem;
+            border-radius: 2rem;
+            text-decoration: none;
+            font-weight: 600;
+            color: #bc632f;
+            font-size: 0.9rem;
+        }
+
+        .tool-card {
+            background: white;
+            border-radius: 2rem;
+            padding: 2rem;
+            box-shadow: 0 20px 35px -12px rgba(0,0,0,0.1);
+            border: 1px solid #ffe2cb;
+            margin-top: 1rem;
+        }
+
+        .tool-card h2 {
+            font-size: 1.8rem;
+            color: #bc632f;
+            margin-bottom: 0.5rem;
+        }
+
+        .tool-card p {
+            color: #c9824c;
+            margin-bottom: 1.5rem;
+        }
+
+        .input-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .input-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #7a4a28;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            font-size: 1rem;
+            border: 2px solid #ffdfc4;
+            border-radius: 1.5rem;
+            outline: none;
+            background: #fffef7;
+            font-family: monospace;
+        }
+
+        .input-group input:focus {
+            border-color: #e7ac78;
+        }
+
+        .btn-generate {
+            background: #e7ac78;
+            border: none;
+            padding: 0.7rem 1.8rem;
+            border-radius: 3rem;
+            font-size: 1rem;
+            font-weight: 600;
+            color: white;
+            cursor: pointer;
+            transition: 0.2s;
+            display: inline-block;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn-generate:hover {
+            background: #bc632f;
+            transform: scale(0.98);
+        }
+
+        .result-area {
+            background: #fef3e8;
+            border-radius: 1.5rem;
+            padding: 1.2rem;
+            font-family: monospace;
+            word-break: break-all;
+            border: 1px solid #ffdcc0;
+        }
+
+        .result-label {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #7a4a28;
+        }
+
+        .hash-value {
+            font-size: 0.85rem;
+            color: #2d2a24;
+            background: white;
+            padding: 0.8rem;
+            border-radius: 1rem;
+            border: 1px solid #f0d5b5;
+            margin-top: 0.5rem;
+        }
+
+        .copy-btn {
+            background: #f0cfb3;
+            border: none;
+            padding: 0.4rem 1rem;
+            border-radius: 2rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            margin-top: 0.8rem;
+            color: #9b4a1a;
+            font-weight: 500;
+        }
+
+        .copy-btn:hover {
+            background: #e7ac78;
+            color: white;
+        }
+
+        .footer-note {
+            text-align: center;
+            margin-top: 2rem;
+            font-size: 0.8rem;
+            color: #b3865f;
+            border-top: 1px dashed #f2d5b5;
+            padding-top: 1.5rem;
+        }
+
+        @media (max-width: 680px) {
+            .container {
+                padding: 1rem;
+            }
+            .navbar {
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- 密码锁界面（验证通过前显示） -->
+<div id="lockScreen" class="lock-screen">
+    <div class="lock-card">
+        <h2>🔐 管理员验证</h2>
+        <p>请输入管理员密码</p>
+        <input type="password" id="adminPasswordInput" placeholder="密码" autofocus>
+        <button id="unlockAdminBtn">验证身份 ✨</button>
+        <div id="errorMsg" class="error-msg">❌ 密码错误，无权限访问</div>
+    </div>
+</div>
+
+<!-- 管理员工具主体（初始隐藏） -->
+<div id="adminContent" class="admin-content">
+    <div class="container">
+        <div class="navbar">
+            <div class="logo-area">
+                <span class="page-title">🛠️ 管理员工具 · 密码转换器</span>
+            </div>
+            <a href="index.html" class="back-home">🏠 返回小窝</a>
+        </div>
+
+        <div class="tool-card">
+            <h2>🔐 明文密码 → SHA-256 密文</h2>
+            <p>输入任意密码，生成对应的哈希值，用于替换 <strong>index.html</strong> 中的 <code>PASSWORD_HASH</code>。</p>
+            <div class="input-group">
+                <label>📝 明文密码</label>
+                <input type="text" id="plainPassword" placeholder="例如：2402 或 新密码" autocomplete="off">
+            </div>
+            <button id="generateBtn" class="btn-generate">✨ 生成密文</button>
+            <div class="result-area">
+                <div class="result-label">🔑 SHA-256 哈希值：</div>
+                <div id="hashResult" class="hash-value">等待生成...</div>
+                <button id="copyHashBtn" class="copy-btn">📋 复制哈希</button>
+            </div>
+        </div>
+
+        <div class="footer-note">
+            🛡️ 此工具仅前端计算，不会上传任何数据。
+        </div>
+    </div>
+</div>
+
+<script>
+    // ========= 管理员页面独立密码（SHA-256 哈希）=========
+    const ADMIN_PASSWORD_HASH = "5a4ca9fc0dbfa156b00aca8f59355992500b9225c0b5bd3366f97b08e5e48fc9";
+
+    // SHA-256 哈希函数（与 index.html 中相同）
+    async function sha256(message) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(message);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return hashHex;
+    }
+
+    // 验证管理员密码
+    async function verifyAdminPassword(inputPwd) {
+        const inputHash = await sha256(inputPwd);
+        return inputHash === ADMIN_PASSWORD_HASH;
+    }
+
+    // 解锁管理员工具
+    function unlockAdmin() {
+        document.getElementById('lockScreen').style.opacity = '0';
+        setTimeout(() => {
+            document.getElementById('lockScreen').style.display = 'none';
+            document.getElementById('adminContent').style.display = 'block';
+        }, 500);
+        sessionStorage.setItem('adminUnlocked', 'true');
+    }
+
+    // 处理管理员密码输入
+    async function handleAdminUnlock() {
+        const inputEl = document.getElementById('adminPasswordInput');
+        const errorEl = document.getElementById('errorMsg');
+        const pwd = inputEl.value;
+
+        if (await verifyAdminPassword(pwd)) {
+            errorEl.style.display = 'none';
+            unlockAdmin();
+        } else {
+            errorEl.style.display = 'block';
+            inputEl.value = '';
+            inputEl.focus();
+        }
+    }
+
+    // 检查是否已经解锁过（刷新页面自动通过）
+    function checkAdminAlreadyUnlocked() {
+        if (sessionStorage.getItem('adminUnlocked') === 'true') {
+            unlockAdmin();
+        }
+    }
+
+    // 明文转密文功能
+    async function generateAndDisplayHash() {
+        const plainInput = document.getElementById('plainPassword');
+        const plainText = plainInput.value.trim();
+        if (!plainText) {
+            alert('请先输入明文密码');
+            return;
+        }
+        const hash = await sha256(plainText);
+        const hashResultDiv = document.getElementById('hashResult');
+        hashResultDiv.textContent = hash;
+        // 同时存储到 data 属性中，方便复制
+        hashResultDiv.setAttribute('data-hash', hash);
+    }
+
+    // 复制哈希值
+    function copyHash() {
+        const hashDiv = document.getElementById('hashResult');
+        const hash = hashDiv.textContent;
+        if (!hash || hash === '等待生成...') {
+            alert('没有可复制的哈希值，请先生成');
+            return;
+        }
+        navigator.clipboard.writeText(hash).then(() => {
+            alert('✅ 哈希值已复制到剪贴板');
+        }).catch(() => {
+            alert('❌ 复制失败，请手动复制');
+        });
+    }
+
+    // 绑定事件
+    function bindAdminEvents() {
+        const unlockBtn = document.getElementById('unlockAdminBtn');
+        const pwdInput = document.getElementById('adminPasswordInput');
+        unlockBtn.addEventListener('click', handleAdminUnlock);
+        pwdInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleAdminUnlock();
+            }
+        });
+
+        const generateBtn = document.getElementById('generateBtn');
+        generateBtn.addEventListener('click', generateAndDisplayHash);
+        const copyBtn = document.getElementById('copyHashBtn');
+        copyBtn.addEventListener('click', copyHash);
+        // 也可以支持明文输入框按回车直接生成
+        const plainInput = document.getElementById('plainPassword');
+        plainInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                generateAndDisplayHash();
+            }
+        });
+    }
+
+    // 初始化
+    checkAdminAlreadyUnlocked();
+    bindAdminEvents();
+</script>
+</body>
+</html>

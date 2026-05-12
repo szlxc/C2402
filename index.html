@@ -297,7 +297,11 @@
                 <span class="site-name">🏡 2402的小窝</span>
                 <span class="slogan-badge">自信二班 · 永创辉煌</span>
             </div>
-            <a href="resources.html" class="nav-btn">📦 2402的资源站 →</a>
+            <div style="display: flex; gap: 0.8rem;">
+                <a href="resources.html" class="nav-btn">📦 2402的资源站 →</a>
+                <!-- 新增：管理员模式按钮，点击跳转到 admin.html -->
+                <a href="admin.html" class="nav-btn">👑 管理员模式</a>
+            </div>
         </div>
 
         <div class="hero">
@@ -314,10 +318,28 @@
 </div>
 
 <script>
-    // ========= 访问密码配置 =========
-    // 🔐 在这里修改你的密码（建议使用数字/字母组合，不要用特殊字符）
-    const SITE_PASSWORD = "2402";  // 你可以改成其他密码
-    
+    // ========= 密码加密（使用 SHA-256 哈希，避免明文） =========
+    // 原始密码为 "2402"，以下是它的 SHA-256 哈希值（32字节，十六进制表示）
+    // 你可以通过任何 SHA-256 工具计算得到，例如在浏览器控制台执行：
+    // crypto.subtle.digest('SHA-256', new TextEncoder().encode('2402')).then(h => console.log([...new Uint8Array(h)].map(b => b.toString(16).padStart(2,'0')).join('')))
+    const PASSWORD_HASH = "4708f9c61a5e58b72774193f69bf37442423a4d2673e1f2cdc3f07f2614aba5d";
+
+    // 异步 SHA-256 哈希函数
+    async function sha256(message) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(message);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return hashHex;
+    }
+
+    // 验证密码：对用户输入计算哈希，与存储的哈希比较
+    async function verifyPassword(inputPwd) {
+        const inputHash = await sha256(inputPwd);
+        return inputHash === PASSWORD_HASH;
+    }
+
     // 页面内嵌板块数据
     const mainBlocks = [
         {
@@ -329,11 +351,6 @@
         }
     ];
 
-    // 验证密码逻辑
-    function verifyPassword(inputPwd) {
-        return inputPwd === SITE_PASSWORD;
-    }
-
     // 解锁网站
     function unlockSite() {
         document.getElementById('lockScreen').style.opacity = '0';
@@ -341,17 +358,16 @@
             document.getElementById('lockScreen').style.display = 'none';
             document.getElementById('websiteContent').style.display = 'block';
         }, 500);
-        // 记录已验证状态到 sessionStorage（刷新页面后不需要重复输入）
         sessionStorage.setItem('siteUnlocked', 'true');
     }
 
-    // 处理密码输入
-    function handleUnlock() {
+    // 处理密码输入（异步）
+    async function handleUnlock() {
         const inputEl = document.getElementById('passwordInput');
         const errorEl = document.getElementById('errorMsg');
         const pwd = inputEl.value;
-        
-        if (verifyPassword(pwd)) {
+
+        if (await verifyPassword(pwd)) {
             errorEl.style.display = 'none';
             unlockSite();
         } else {
@@ -361,14 +377,14 @@
         }
     }
 
-    // 检查是否已经解锁过（刷新页面后自动通过）
+    // 检查是否已经解锁过（刷新页面自动通过）
     function checkAlreadyUnlocked() {
         if (sessionStorage.getItem('siteUnlocked') === 'true') {
             unlockSite();
         }
     }
 
-    // 渲染首页板块（原有逻辑）
+    // 渲染首页板块
     function renderHomeBlocks() {
         const grid = document.getElementById("mainGrid");
         if (!grid) return;
@@ -391,7 +407,7 @@
             `;
         }
         grid.innerHTML = html;
-        
+
         document.querySelectorAll('.card').forEach(card => {
             const link = card.getAttribute('data-link');
             if (link) {
@@ -419,7 +435,7 @@
     function bindUnlockEvents() {
         const inputEl = document.getElementById('passwordInput');
         const btnEl = document.getElementById('unlockBtn');
-        
+
         btnEl.addEventListener('click', handleUnlock);
         inputEl.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
