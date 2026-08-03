@@ -16,6 +16,7 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
 from datetime import datetime
+import requests
 
 from core.colors import *
 from core.utils import *
@@ -24,15 +25,16 @@ from core.utils import *
 class InfoGathering:
     """信息收集类 - 提供多种信息收集工具"""
 
-    def __init__(self, target):
+    def __init__(self, target=None):
         """
         初始化信息收集器
         :param target: 目标域名、IP或URL
         """
-        self.target = target.strip()
+        self.target = target.strip() if target else None
         self.domain = None
         self.ip = None
-        self._resolve_target()
+        if self.target:
+            self._resolve_target()
 
     def _resolve_target(self):
         """解析目标，提取域名和IP"""

@@ -93,8 +93,8 @@ def print_error(msg):
     print(f"{Colors.RED}[-]{Colors.RESET} {msg}")
 
 
-def print_banner(msg):
-    """打印横幅"""
+def print_banner_msg(msg):
+    """打印带颜色的横幅文本"""
     print(f"{Colors.CYAN}{Colors.BOLD}{msg}{Colors.RESET}")
 
 

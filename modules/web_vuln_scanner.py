@@ -9,16 +9,15 @@ HTTP方法枚举、WAF检测等18种检测
 import re
 import copy
 import random
-import urllib3
+import warnings
 import requests
 from urllib.parse import urlparse, urljoin, quote
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 from core.colors import *
 from core.utils import *
 
 # 禁用SSL警告
-urllib3.disable_warnings(InsecureRequestWarning)
+warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 
 class WebVulnScanner:

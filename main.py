@@ -180,7 +180,7 @@ def info_gathering_menu():
             wordlist = get_input("  字典文件路径 (可选): ", required=False)
             run_tool(module_class, method, target, wordlist or None)
         else:
-            instance.method_router(method, target)
+            run_tool(module_class, method, target)
 
         wait_for_enter()
 
@@ -324,7 +324,7 @@ def exploitation_menu():
             url = get_input("  请输入下载URL: ")
             run_tool(module_class, method, url)
         else:
-            instance.method_router(method)
+            run_tool(module_class, method)
 
         wait_for_enter()
 
@@ -1014,8 +1014,10 @@ def quick_scan_menu():
     # 4. HTTP头检测
     if is_valid_url(target) or target.startswith(('http://', 'https://')):
         url = normalize_url(target)
-        info_gathering = load_module("info_gathering")()
-        info_gathering.http_headers(url)
+        IG = load_module("info_gathering")
+        if IG:
+            info_gathering = IG(target=url)
+            info_gathering.http_headers()
 
     # 5. 保存结果
     save_results(f"quick_scan_{get_timestamp()}.txt",
