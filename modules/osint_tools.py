@@ -4,12 +4,17 @@ OSINT (开源情报) 工具模块
 提供邮箱、用户名、电话、IP、域名等情报收集功能
 """
 
+import socket
+import struct
+import sys
+import os
 import re
 import json
 import time
 import hashlib
-import dns.resolver
-import dns.exception
+import threading
+from urllib.parse import urlparse, urljoin
+from datetime import datetime
 import requests
 
 from core.colors import *
@@ -99,6 +104,19 @@ class OsintTools:
     # 常见DNS记录类型
     DNS_RECORD_TYPES = ["A", "AAAA", "MX", "CNAME", "NS", "TXT", "SOA", "SRV", "CAA"]
 
+    # DNS 记录类型到数字的映射
+    DNS_TYPE_MAP = {
+        "A": 1,
+        "AAAA": 28,
+        "MX": 15,
+        "CNAME": 5,
+        "NS": 2,
+        "TXT": 16,
+        "SOA": 6,
+        "SRV": 33,
+        "CAA": 257,
+    }
+
     # 中国手机号段
     CHINA_PHONE_PREFIXES = {
         "中国移动": ["134", "135", "136", "137", "138", "139", "147", "148",
@@ -126,6 +144,186 @@ class OsintTools:
             "Accept": "text/html,application/json,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         })
+
+    # ------------------------------------------------------------------
+    # 原始 DNS 查询辅助方法（使用标准库 socket，无外部依赖）
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _encode_dns_name(domain):
+        """将域名编码为DNS查询中的长度前缀标签格式"""
+        result = b""
+        for label in domain.split("."):
+            result += bytes([len(label)]) + label.encode("utf-8")
+        result += b"\x00"  # 根标签
+        return result
+
+    @staticmethod
+    def _decode_dns_name(data, offset):
+        """
+        从DNS响应中解码域名，处理指针压缩。
+
+        :return: (域名, 新的偏移量)
+        """
+        labels = []
+        while True:
+            if offset >= len(data):
+                break
+            length = data[offset]
+            if length & 0xC0:
+                # 压缩指针：前2位为11，后14位为偏移量
+                pointer = struct.unpack_from("!H", data, offset)[0] & 0x3FFF
+                name_part, _ = OsintTools._decode_dns_name(data, pointer)
+                labels.append(name_part)
+                offset += 2
+                break
+            elif length == 0:
+                offset += 1
+                break
+            else:
+                offset += 1
+                if offset + length > len(data):
+                    break
+                labels.append(data[offset:offset + length].decode("utf-8"))
+                offset += length
+        return ".".join(labels), offset
+
+    def _dns_query(self, domain, record_type=1):
+        """
+        使用原始 UDP socket 向 8.8.8.8:53 发送 DNS 查询并解析响应。
+
+        :param domain: 要查询的域名
+        :param record_type: DNS 记录类型数字（1=A, 28=AAAA, 15=MX, 2=NS, 16=TXT）
+        :return: 记录列表。
+                 A/AAAA: 字符串列表（IP地址）
+                 MX: 字典列表 [{"preference": int, "exchange": str}]
+                 NS/TXT/CNAME: 字符串列表
+        :raises: 查询失败时抛出异常（NXDOMAIN、超时等）
+        """
+        # 构建 DNS 查询头（12 字节）
+        tid = os.urandom(2)                     # 事务 ID
+        flags = struct.pack("!H", 0x0100)       # 标准查询，递归期望
+        qdcount = struct.pack("!H", 1)          # 问题数
+        ancount = struct.pack("!H", 0)          # 回答数
+        nscount = struct.pack("!H", 0)          # 权威数
+        arcount = struct.pack("!H", 0)          # 附加数
+        header = tid + flags + qdcount + ancount + nscount + arcount
+
+        # 构建 DNS 问题部分
+        qname = self._encode_dns_name(domain)
+        qtype = struct.pack("!H", record_type)
+        qclass = struct.pack("!H", 1)           # IN 类
+        question = qname + qtype + qclass
+
+        packet = header + question
+
+        # 发送 UDP 查询
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(5.0)
+        try:
+            sock.sendto(packet, ("8.8.8.8", 53))
+            response, _ = sock.recvfrom(4096)
+        except socket.timeout:
+            raise Exception("DNS 查询超时")
+        except OSError as e:
+            raise Exception(f"DNS 查询网络错误: {e}")
+        finally:
+            sock.close()
+
+        # 解析响应头
+        if len(response) < 12:
+            raise Exception("DNS 响应过短")
+
+        resp_flags = struct.unpack_from("!H", response, 2)[0]
+        rcode = resp_flags & 0x000F
+
+        if rcode == 3:
+            raise Exception("NXDOMAIN")
+        if rcode != 0:
+            raise Exception(f"DNS 响应错误码: {rcode}")
+
+        resp_ancount = struct.unpack_from("!H", response, 6)[0]
+
+        # 跳过问题部分
+        offset = 12
+        for _ in range(struct.unpack_from("!H", response, 4)[0]):
+            # 跳过 QNAME
+            while offset < len(response):
+                length = response[offset]
+                if length == 0:
+                    offset += 1
+                    break
+                elif length & 0xC0:
+                    offset += 2
+                    break
+                else:
+                    offset += 1 + length
+            offset += 4  # 跳过 QTYPE 和 QCLASS
+
+        # 解析回答部分
+        records = []
+        for _ in range(resp_ancount):
+            if offset + 10 > len(response):
+                break
+
+            # 解析 NAME（可能使用压缩指针）
+            _, offset = self._decode_dns_name(response, offset)
+
+            if offset + 10 > len(response):
+                break
+
+            atype, aclass, attl, ardlength = struct.unpack_from("!HHIH", response, offset)
+            offset += 10
+
+            if offset + ardlength > len(response):
+                break
+
+            rdata = response[offset:offset + ardlength]
+            offset += ardlength
+
+            if record_type == 1:  # A
+                if len(rdata) == 4:
+                    ip = ".".join(str(b) for b in rdata)
+                    records.append(ip)
+            elif record_type == 28:  # AAAA
+                if len(rdata) == 16:
+                    ip = ":".join(
+                        f"{rdata[i]:02x}{rdata[i+1]:02x}"
+                        for i in range(0, 16, 2)
+                    )
+                    records.append(ip)
+            elif record_type == 15:  # MX
+                if len(rdata) >= 2:
+                    preference = struct.unpack_from("!H", rdata, 0)[0]
+                    mx_name, _ = self._decode_dns_name(rdata, 2)
+                    records.append({
+                        "preference": preference,
+                        "exchange": mx_name,
+                    })
+            elif record_type == 2:  # NS
+                ns_name, _ = self._decode_dns_name(rdata, 0)
+                records.append(ns_name)
+            elif record_type == 5:  # CNAME
+                cname, _ = self._decode_dns_name(rdata, 0)
+                records.append(cname)
+            elif record_type == 16:  # TXT
+                txt_parts = []
+                txt_off = 0
+                while txt_off < len(rdata):
+                    txt_len = rdata[txt_off]
+                    txt_off += 1
+                    if txt_off + txt_len <= len(rdata):
+                        txt_parts.append(
+                            rdata[txt_off:txt_off + txt_len].decode("utf-8", errors="replace")
+                        )
+                        txt_off += txt_len
+                    else:
+                        break
+                records.append("".join(txt_parts))
+            else:
+                # 其他类型直接返回原始数据
+                records.append(rdata.hex())
+
+        return records
 
     # ------------------------------------------------------------------
     # 1. 邮箱OSINT
@@ -173,12 +371,11 @@ class OsintTools:
 
             # 检查MX记录
             try:
-                import dns.resolver
-                mx_records = dns.resolver.resolve(domain, "MX")
+                mx_records = self._dns_query(domain, 15)
                 for mx in mx_records:
                     record = {
-                        "preference": mx.preference,
-                        "exchange": str(mx.exchange).rstrip("."),
+                        "preference": mx["preference"],
+                        "exchange": mx["exchange"].rstrip("."),
                     }
                     result["mx_records"].append(record)
                     print_info(f"MX记录: {record['exchange']} (优先级: {record['preference']})")
@@ -188,12 +385,8 @@ class OsintTools:
                     print_success(f"域名 {domain} 有有效的MX记录，邮箱可接收邮件")
                 else:
                     print_warning(f"域名 {domain} 没有MX记录")
-            except dns.exception.DNSException as e:
-                print_warning(f"DNS查询失败 (MX记录): {e}")
-            except ImportError:
-                print_warning("缺少dnspython库，跳过MX记录查询")
             except Exception as e:
-                print_warning(f"MX记录查询异常: {e}")
+                print_warning(f"DNS查询失败 (MX记录): {e}")
 
             # 常见平台注册检查
             print_info("正在检查常见平台注册情况...")
@@ -607,23 +800,23 @@ class OsintTools:
                 for dnsbl in dnsbl_servers:
                     query = f"{reversed_ip}.{dnsbl}"
                     try:
-                        import dns.resolver
-                        try:
-                            dns.resolver.resolve(query, "A")
+                        # 查询A记录 — 如果返回结果表示在黑名单中
+                        answers = self._dns_query(query, 1)
+                        if answers:
                             result["blacklists"][dnsbl] = True
                             print_warning(f"[{dnsbl}] 被列入黑名单!")
                             result["risk_score"] += 20
-                        except dns.resolver.NXDOMAIN:
+                        else:
                             result["blacklists"][dnsbl] = False
                             print_info(f"[{dnsbl}] 未列入黑名单")
-                        except dns.exception.Timeout:
-                            result["blacklists"][dnsbl] = None
-                            print_info(f"[{dnsbl}] 查询超时")
-                    except ImportError:
-                        print_warning("缺少dnspython库，跳过DNSBL检查")
-                        break
                     except Exception as e:
-                        print_warning(f"[{dnsbl}] 查询异常: {e}")
+                        error_str = str(e)
+                        if "NXDOMAIN" in error_str:
+                            result["blacklists"][dnsbl] = False
+                            print_info(f"[{dnsbl}] 未列入黑名单")
+                        else:
+                            result["blacklists"][dnsbl] = None
+                            print_info(f"[{dnsbl}] 查询异常: {e}")
 
             # 检查Google Safe Browsing（模拟）
             print_info("正在检查Google Safe Browsing...")
@@ -933,39 +1126,41 @@ class OsintTools:
             print_info(f"正在执行DNS Dumpster查询: {domain}")
 
             # 查询各类DNS记录
-            for record_type in self.DNS_RECORD_TYPES:
-                try:
-                    import dns.resolver
-                    try:
-                        answers = dns.resolver.resolve(domain, record_type, raise_on_no_answer=False)
-                        records = []
-                        for rdata in answers:
-                            record_str = str(rdata).rstrip(".")
-                            records.append(record_str)
-                            print_info(f"[{record_type}] {record_str}")
+            for record_type_name in self.DNS_RECORD_TYPES:
+                record_type_num = self.DNS_TYPE_MAP.get(record_type_name)
+                if record_type_num is None:
+                    continue
 
-                            # 收集特定类型
-                            if record_type == "MX":
-                                result["mx_servers"].append(record_str)
-                            elif record_type == "NS":
+                try:
+                    records = self._dns_query(domain, record_type_num)
+                    record_strs = []
+                    for rdata in records:
+                        if isinstance(rdata, dict):
+                            # MX 记录 (preference + exchange)
+                            record_str = f"{rdata['exchange']} (优先级: {rdata['preference']})"
+                            record_strs.append(record_str)
+                            result["mx_servers"].append(record_str)
+                        else:
+                            record_str = str(rdata).rstrip(".")
+                            record_strs.append(record_str)
+                            if record_type_name == "NS":
                                 result["ns_servers"].append(record_str)
 
-                        if records:
-                            if record_type not in result["records"]:
-                                result["records"][record_type] = []
-                            result["records"][record_type].extend(records)
-                    except dns.resolver.NoAnswer:
-                        print_info(f"[{record_type}] 无记录")
-                    except dns.resolver.NXDOMAIN:
+                        print_info(f"[{record_type_name}] {record_str}")
+
+                    if record_strs:
+                        if record_type_name not in result["records"]:
+                            result["records"][record_type_name] = []
+                        result["records"][record_type_name].extend(record_strs)
+                    else:
+                        print_info(f"[{record_type_name}] 无记录")
+                except Exception as e:
+                    error_str = str(e)
+                    if "NXDOMAIN" in error_str:
                         print_error(f"域名 {domain} 不存在")
                         return result
-                except ImportError:
-                    print_warning("缺少dnspython库，跳过DNS记录查询")
-                    break
-                except dns.exception.Timeout:
-                    print_warning(f"[{record_type}] 查询超时")
-                except Exception as e:
-                    print_warning(f"[{record_type}] 查询异常: {e}")
+                    else:
+                        print_warning(f"[{record_type_name}] 查询异常: {e}")
 
             # 子域名枚举（被动方式）
             print_info("\n正在执行被动子域名枚举...")
@@ -1198,43 +1393,42 @@ class OsintTools:
 
             # 检查MX记录
             try:
-                import dns.resolver
-                try:
-                    dns.resolver.resolve(domain, "MX")
+                mx_records = self._dns_query(domain, 15)
+                if mx_records:
                     result["mx_valid"] = True
                     result["positive_factors"].append("有效MX记录")
                     result["reputation_score"] += 10
                     print_success("MX记录有效")
-                except dns.resolver.NoAnswer:
+                else:
                     result["risk_factors"].append("无MX记录")
                     result["reputation_score"] -= 15
                     print_warning("该域名无MX记录")
-                except dns.resolver.NXDOMAIN:
+            except Exception as e:
+                if "NXDOMAIN" in str(e):
                     result["risk_factors"].append("域名不存在")
                     result["reputation_score"] -= 25
                     print_error("域名不存在")
                     return result
-            except ImportError:
-                print_warning("缺少dnspython库，跳过DNS检查")
+                else:
+                    print_warning(f"DNS查询失败 (MX记录): {e}")
 
-            # 检查SPF记录
+            # 检查SPF记录（通过TXT查询）
             try:
-                import dns.resolver
-                try:
-                    spf_answers = dns.resolver.resolve(domain, "TXT")
-                    for txt in spf_answers:
-                        txt_str = str(txt)
-                        if "v=spf1" in txt_str:
-                            result["spf_valid"] = True
-                            result["positive_factors"].append("SPF记录存在")
-                            result["reputation_score"] += 5
-                            print_success("SPF记录存在")
-                            break
-                except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+                txt_records = self._dns_query(domain, 16)
+                has_spf = False
+                for txt in txt_records:
+                    if "v=spf1" in txt:
+                        has_spf = True
+                        result["spf_valid"] = True
+                        result["positive_factors"].append("SPF记录存在")
+                        result["reputation_score"] += 5
+                        print_success("SPF记录存在")
+                        break
+                if not has_spf:
                     result["risk_factors"].append("无SPF记录")
                     result["reputation_score"] -= 5
                     print_warning("无SPF记录")
-            except ImportError:
+            except Exception:
                 pass
 
             # 检查是否为常见邮箱域名

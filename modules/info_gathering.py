@@ -4,19 +4,18 @@
 """
 
 import socket
+import struct
 import ssl
-import dns.resolver
-import dns.zone
-import dns.query
-import dns.name
-import requests
-import json
+import sys
+import os
 import re
+import json
 import time
+import threading
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.colors import *
 from core.utils import *
@@ -60,6 +59,390 @@ class InfoGathering:
         })
         session.timeout = timeout
         return session
+
+    # ==================== DNS 辅助函数 ====================
+
+    def _encode_dns_name(self, domain):
+        """
+        将域名编码为DNS格式（标签长度+标签内容，以0x00结尾）
+        e.g. 'www.example.com' -> b'\x03www\x07example\x03com\x00'
+        """
+        parts = domain.rstrip('.').split('.')
+        result = b''
+        for part in parts:
+            if not part:
+                continue
+            result += bytes([len(part)]) + part.encode('ascii', errors='ignore')
+        result += b'\x00'
+        return result
+
+    def _decode_dns_name(self, data, offset):
+        """
+        解码DNS响应中的域名，处理压缩指针
+
+        压缩指针格式：前两位为11，后14位为偏移量
+        返回 (域名, 解析后的新偏移量)
+        """
+        labels = []
+        jumped = False
+        jumps_remaining = 10  # 防止循环引用
+        current = offset
+        final_offset = None
+
+        while jumps_remaining > 0:
+            jumps_remaining -= 1
+            length = data[current]
+            if length == 0:
+                if not jumped:
+                    final_offset = current + 1
+                else:
+                    final_offset = offset + 2
+                current += 1
+                break
+            if length & 0xc0:  # 压缩指针 (11xxxxxx)
+                if not jumped:
+                    # 首次遇到指针，记录后续解析位置
+                    final_offset = current + 2
+                    jumped = True
+                pointer = ((length & 0x3f) << 8) | data[current + 1]
+                current = pointer
+            else:
+                current += 1
+                labels.append(data[current:current + length].decode('ascii', errors='ignore'))
+                current += length
+
+        if not jumped:
+            final_offset = current
+
+        return '.'.join(labels), final_offset
+
+    def _dns_query(self, domain, record_type='A', timeout=5):
+        """
+        发送原始DNS UDP查询到8.8.8.8:53并解析响应
+
+        支持的记录类型及对应QTYPE值:
+            A (1), AAAA (28), MX (15), NS (2), TXT (16), SOA (6), CNAME (5), PTR (12)
+
+        :param domain: 要查询的域名
+        :param record_type: 记录类型字符串
+        :param timeout: 超时时间（秒）
+        :return: 记录字符串列表，失败返回空列表
+        """
+        record_types = {
+            'A': 1, 'AAAA': 28, 'MX': 15, 'NS': 2,
+            'TXT': 16, 'SOA': 6, 'CNAME': 5, 'PTR': 12,
+        }
+        qtype = record_types.get(record_type.upper(), 1)
+
+        # 构建DNS查询包
+        transaction_id = 0x1234
+        flags = 0x0100  # 标准查询，期望递归
+        qdcount = 1
+        ancount = 0
+        nscount = 0
+        arcount = 0
+
+        header = struct.pack('!HHHHHH', transaction_id, flags, qdcount, ancount, nscount, arcount)
+        question = self._encode_dns_name(domain) + struct.pack('!HH', qtype, 1)  # QCLASS=1 (IN)
+
+        packet = header + question
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            sock.sendto(packet, ('8.8.8.8', 53))
+
+            response, _ = sock.recvfrom(65535)
+            sock.close()
+        except socket.timeout:
+            print_warning(f"DNS {record_type} 查询超时: {domain}")
+            return []
+        except socket.error as e:
+            print_warning(f"DNS查询socket错误: {e}")
+            return []
+        except Exception as e:
+            print_warning(f"DNS查询异常: {e}")
+            return []
+
+        # 解析响应
+        try:
+            return self._parse_dns_response(response, qtype, domain)
+        except Exception as e:
+            print_warning(f"DNS响应解析失败: {e}")
+            return []
+
+    def _parse_dns_response(self, response, qtype, domain):
+        """
+        解析DNS响应包，提取查询结果
+
+        :param response: 原始DNS响应数据
+        :param qtype: 查询类型编号
+        :param domain: 查询的域名（用于过滤）
+        :return: 记录字符串列表
+        """
+        if len(response) < 12:
+            return []
+
+        # 解析头
+        header = struct.unpack('!HHHHHH', response[:12])
+        tid, flags, qdcount, ancount, nscount, arcount = header
+
+        # 检查响应码
+        rcode = flags & 0x000f
+        if rcode == 3:  # NXDOMAIN
+            return ['NXDOMAIN']
+        if rcode != 0:
+            return []
+
+        offset = 12
+
+        # 跳过问题区
+        for _ in range(qdcount):
+            _, offset = self._decode_dns_name(response, offset)
+            offset += 4  # 跳过 QTYPE 和 QCLASS
+
+        records = []
+
+        # 解析答案区
+        for _ in range(ancount):
+            if offset >= len(response):
+                break
+
+            # 解析NAME
+            name, offset = self._decode_dns_name(response, offset)
+
+            if offset + 10 > len(response):
+                break
+
+            rtype, rclass, ttl, rdlength = struct.unpack('!HHIH', response[offset:offset + 10])
+            offset += 10
+
+            if offset + rdlength > len(response):
+                break
+
+            rdata = response[offset:offset + rdlength]
+            offset += rdlength
+
+            # 根据类型解析记录
+            parsed = self._parse_dns_rdata(rtype, rclass, ttl, rdata, name, response)
+            if parsed is not None:
+                records.append(parsed)
+
+        return records
+
+    def _parse_dns_rdata(self, rtype, rclass, ttl, rdata, name, response):
+        """
+        解析单条DNS资源记录的RDATA
+
+        :param rtype: 记录类型
+        :param rclass: 类
+        :param ttl: TTL
+        :param rdata: RDATA字节
+        :param name: 记录名称
+        :param response: 完整响应（用于解压缩指针）
+        :return: 格式化记录字符串
+        """
+        _ = rclass  # 未使用
+
+        if rtype == 1:  # A
+            if len(rdata) == 4:
+                ip = socket.inet_ntoa(rdata)
+                return ip
+
+        elif rtype == 28:  # AAAA
+            if len(rdata) == 16:
+                ip = socket.inet_ntop(socket.AF_INET6, rdata)
+                return ip
+
+        elif rtype == 5:  # CNAME
+            target_name, _ = self._decode_dns_name(rdata, 0)
+            return target_name
+
+        elif rtype == 2:  # NS
+            ns_name, _ = self._decode_dns_name(rdata, 0)
+            return ns_name
+
+        elif rtype == 15:  # MX
+            if len(rdata) >= 2:
+                preference = struct.unpack('!H', rdata[:2])[0]
+                mx_name, _ = self._decode_dns_name(rdata, 2)
+                return f"{preference} {mx_name}"
+
+        elif rtype == 16:  # TXT
+            txt_parts = []
+            pos = 0
+            while pos < len(rdata):
+                txt_len = rdata[pos]
+                pos += 1
+                if pos + txt_len <= len(rdata):
+                    txt_parts.append(rdata[pos:pos + txt_len].decode('utf-8', errors='ignore'))
+                    pos += txt_len
+                else:
+                    break
+            txt_str = ''.join(txt_parts)
+            return f'"{txt_str}"' if txt_str else '""'
+
+        elif rtype == 6:  # SOA
+            # MNAME + RNAME + serial + refresh + retry + expire + minimum
+            mname, offset = self._decode_dns_name(rdata, 0)
+            rname, offset = self._decode_dns_name(rdata, offset)
+            if offset + 20 <= len(rdata):
+                serial, refresh, retry, expire, minimum = struct.unpack('!IIIII', rdata[offset:offset + 20])
+                return f"{mname} {rname} {serial} {refresh} {retry} {expire} {minimum}"
+
+        elif rtype == 12:  # PTR
+            ptr_name, _ = self._decode_dns_name(rdata, 0)
+            return ptr_name
+
+        return None
+
+    def _dns_zone_transfer(self, domain, nameserver, timeout=10):
+        """
+        DNS区域传输 - 使用TCP连接nameserver的53端口，发送AXFR请求
+
+        AXFR使用TCP模式的DNS查询，QTYPE=252
+        响应可能包含多个DNS消息，每个消息前有2字节长度前缀
+
+        :param domain: 要传输的域名
+        :param nameserver: 目标DNS服务器域名或IP
+        :param timeout: 超时时间（秒）
+        :return: (成功标志, 记录列表 或 错误信息)
+        """
+        transaction_id = 0x5678
+        flags = 0x0000  # 标准查询，不期望递归
+        qdcount = 1
+        ancount = 0
+        nscount = 0
+        arcount = 0
+
+        header = struct.pack('!HHHHHH', transaction_id, flags, qdcount, ancount, nscount, arcount)
+        question = self._encode_dns_name(domain) + struct.pack('!HH', 252, 1)  # QTYPE=252 (AXFR), QCLASS=1 (IN)
+        dns_query = header + question
+
+        # TCP模式：前2字节为消息长度（大端）
+        tcp_packet = struct.pack('!H', len(dns_query)) + dns_query
+
+        try:
+            # 解析nameserver IP
+            try:
+                ns_ip = socket.gethostbyname(nameserver)
+            except socket.gaierror:
+                return False, f"无法解析NS服务器IP: {nameserver}"
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect((ns_ip, 53))
+            sock.sendall(tcp_packet)
+
+            all_records = []
+            # AXFR响应可能包含多个消息
+            while True:
+                # 读取2字节长度前缀
+                raw_len = sock.recv(2)
+                if not raw_len or len(raw_len) < 2:
+                    break
+                msg_len = struct.unpack('!H', raw_len)[0]
+                if msg_len == 0:
+                    break
+
+                # 读取完整的DNS消息
+                msg_data = b''
+                while len(msg_data) < msg_len:
+                    chunk = sock.recv(msg_len - len(msg_data))
+                    if not chunk:
+                        break
+                    msg_data += chunk
+
+                if not msg_data:
+                    break
+
+                # 解析消息中的记录
+                records = self._parse_axfr_response(msg_data, domain)
+                all_records.extend(records)
+
+                # 检查是否还有更多消息（通过socket的可用数据判断）
+                if len(all_records) > 0:
+                    sock.settimeout(1)
+                    try:
+                        peek = sock.recv(2, socket.MSG_PEEK)
+                        if not peek or len(peek) < 2:
+                            break
+                    except (socket.timeout, BlockingIOError):
+                        break
+                    finally:
+                        sock.settimeout(timeout)
+
+            sock.close()
+
+            if all_records:
+                return True, all_records
+            else:
+                return False, "区域传输未返回数据"
+
+        except socket.timeout:
+            return False, "区域传输超时"
+        except socket.error as e:
+            return False, f"TCP连接错误: {e}"
+        except Exception as e:
+            return False, f"区域传输异常: {e}"
+
+    def _parse_axfr_response(self, msg_data, domain):
+        """
+        解析AXFR响应消息中的记录
+
+        :param msg_data: DNS消息数据
+        :param domain: 查询的域名
+        :return: 记录字符串列表
+        """
+        if len(msg_data) < 12:
+            return []
+
+        header = struct.unpack('!HHHHHH', msg_data[:12])
+        _, _, _, ancount, _, _ = header
+
+        offset = 12
+        # 跳过问题区
+        qdcount = header[2]
+        for _ in range(qdcount):
+            _, offset = self._decode_dns_name(msg_data, offset)
+            offset += 4
+
+        records = []
+        for _ in range(ancount):
+            if offset >= len(msg_data):
+                break
+
+            name, offset = self._decode_dns_name(msg_data, offset)
+
+            if offset + 10 > len(msg_data):
+                break
+
+            rtype, rclass, ttl, rdlength = struct.unpack('!HHIH', msg_data[offset:offset + 10])
+            offset += 10
+
+            if offset + rdlength > len(msg_data):
+                break
+
+            rdata = msg_data[offset:offset + rdlength]
+            offset += rdlength
+
+            # 格式化记录
+            name_str = name if name else domain
+            type_names = {
+                1: 'A', 2: 'NS', 5: 'CNAME', 6: 'SOA', 15: 'MX',
+                28: 'AAAA', 12: 'PTR', 16: 'TXT', 252: 'AXFR',
+            }
+            type_name = type_names.get(rtype, f'TYPE{rtype}')
+            class_names = {1: 'IN'}
+            class_name = class_names.get(rclass, f'CLASS{rclass}')
+
+            parsed_rdata = self._parse_dns_rdata(rtype, rclass, ttl, rdata, name, msg_data)
+            rdata_str = parsed_rdata if parsed_rdata else '(unparsed)'
+
+            record_str = f"{name_str}. {ttl} {class_name} {type_name} {rdata_str}"
+            records.append(record_str)
+
+        return records
 
     # ==================== 1. WHOIS查询 ====================
 
@@ -212,42 +595,27 @@ class InfoGathering:
             return results
 
         try:
-            resolver = dns.resolver.Resolver()
-            resolver.timeout = 5
-            resolver.lifetime = 5
-
             for rtype in record_types:
                 try:
                     print_info(f"查询 {rtype} 记录...")
-                    answers = resolver.resolve(self.domain, rtype)
+                    answers = self._dns_query(self.domain, rtype, timeout=5)
 
-                    records = []
-                    for rdata in answers:
-                        record_str = rdata.to_text()
-                        records.append(record_str)
-
-                    if records:
-                        results[rtype] = records
-                        print_success(f"找到 {len(records)} 条 {rtype} 记录:")
-                        for rec in records:
-                            print_info(f"  {rec}")
+                    if answers:
+                        # 过滤NXDOMAIN标记
+                        records = [r for r in answers if r != 'NXDOMAIN']
+                        if records:
+                            results[rtype] = records
+                            print_success(f"找到 {len(records)} 条 {rtype} 记录:")
+                            for rec in records:
+                                print_info(f"  {rec}")
+                        else:
+                            print_info(f"无 {rtype} 记录")
                     else:
                         print_info(f"无 {rtype} 记录")
 
-                except dns.resolver.NoAnswer:
-                    print_info(f"无 {rtype} 记录")
-                except dns.resolver.NXDOMAIN:
-                    print_error(f"域名 {self.domain} 不存在")
-                    break
-                except dns.resolver.Timeout:
-                    print_warning(f"{rtype} 查询超时")
-                except dns.exception.DNSException as e:
+                except Exception as e:
                     print_warning(f"{rtype} 查询失败: {e}")
 
-        except dns.resolver.NoNameservers:
-            print_error("无法找到DNS服务器")
-        except dns.exception.DNSException as e:
-            print_error(f"DNS解析器初始化失败: {e}")
         except Exception as e:
             print_error(f"DNS枚举异常: {e}")
 
@@ -719,26 +1087,18 @@ class InfoGathering:
 
             # 尝试通过DNS PTR记录查询
             try:
-                import dns.reversename
-                reverse_name = dns.reversename.from_address(target_ip)
-                resolver = dns.resolver.Resolver()
-                resolver.timeout = 5
-                resolver.lifetime = 5
-                try:
-                    ptr_answers = resolver.resolve(reverse_name, 'PTR')
-                    ptr_records = [str(rdata) for rdata in ptr_answers]
-                    results['ptr_records'] = ptr_records
-                    print_info("PTR记录:")
-                    for ptr in ptr_records:
-                        print_info(f"  - {ptr}")
-                except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
-                    print_info("无额外PTR记录")
-                except dns.resolver.Timeout:
-                    print_warning("DNS PTR查询超时")
-                except dns.exception.DNSException:
-                    print_info("DNS PTR查询失败")
-            except ImportError:
-                print_info("dns.reversename不可用，跳过PTR查询")
+                # 构建反向查询域名 (e.g., 8.8.8.8 -> 8.8.8.8.in-addr.arpa)
+                ip_parts = target_ip.split('.')
+                if len(ip_parts) == 4:
+                    reverse_domain = f"{ip_parts[3]}.{ip_parts[2]}.{ip_parts[1]}.{ip_parts[0]}.in-addr.arpa"
+                    ptr_records = self._dns_query(reverse_domain, 'PTR', timeout=5)
+                    if ptr_records and ptr_records[0] != 'NXDOMAIN':
+                        results['ptr_records'] = ptr_records
+                        print_info("PTR记录:")
+                        for ptr in ptr_records:
+                            print_info(f"  - {ptr}")
+                    else:
+                        print_info("无额外PTR记录")
             except Exception as e:
                 print_warning(f"PTR查询异常: {e}")
 
@@ -769,11 +1129,8 @@ class InfoGathering:
 
         try:
             # 获取NS服务器
-            resolver = dns.resolver.Resolver()
-            resolver.timeout = 5
-            resolver.lifetime = 5
-            ns_answers = resolver.resolve(self.domain, 'NS')
-            ns_servers = [str(rdata) for rdata in ns_answers]
+            ns_answers = self._dns_query(self.domain, 'NS', timeout=5)
+            ns_servers = [r for r in ns_answers if r != 'NXDOMAIN']
 
             if ns_servers:
                 results['ns_servers'] = ns_servers
@@ -786,44 +1143,33 @@ class InfoGathering:
                 for ns in ns_servers:
                     try:
                         print_info(f"尝试对 {ns} 进行区域传输...")
-                        ns_ip = socket.gethostbyname(ns)
 
                         # 执行AXFR请求
-                        zone = dns.zone.from_xfr(dns.query.xfr(ns_ip, self.domain, timeout=10, lifetime=15))
+                        success, result = self._dns_zone_transfer(self.domain, ns, timeout=10)
 
-                        if zone:
-                            records = []
-                            for name, node in zone.nodes.items():
-                                rdatasets = node.rdatasets
-                                for rdataset in rdatasets:
-                                    for rdata in rdataset:
-                                        record_str = f"{name}. {rdataset.ttl} {rdataset.rdclass} {rdataset.rdtype} {rdata}"
-                                        records.append(record_str)
-
+                        if success:
+                            records = result
                             zone_transfer_results.append({
                                 'ns': ns,
-                                'ns_ip': ns_ip,
                                 'records_count': len(records),
                                 'records': records[:50]  # 限制50条避免输出过多
                             })
 
-                            print_success(f"区域传输成功! 从 {ns} ({ns_ip}) 获取到 {len(records)} 条记录")
+                            print_success(f"区域传输成功! 从 {ns} 获取到 {len(records)} 条记录")
                             for rec in records[:30]:
                                 print_info(f"  {rec}")
                             if len(records) > 30:
                                 print_info(f"  ... 还有 {len(records) - 30} 条记录")
                         else:
-                            print_info(f"{ns}: 区域传输未返回数据")
+                            error_msg = result
+                            print_warning(f"{ns}: 区域传输被拒绝 ({error_msg})")
+                            zone_transfer_results.append({
+                                'ns': ns,
+                                'status': 'refused',
+                                'error': error_msg
+                            })
 
-                    except dns.query.TransferError as e:
-                        code = getattr(e, 'rcode', 'unknown')
-                        print_warning(f"{ns}: 区域传输被拒绝 (RCODE: {code})")
-                        zone_transfer_results.append({
-                            'ns': ns,
-                            'status': 'refused',
-                            'error': str(e)
-                        })
-                    except dns.exception.Timeout:
+                    except socket.timeout:
                         print_warning(f"{ns}: 区域传输超时")
                     except socket.gaierror:
                         print_error(f"{ns}: 无法解析NS服务器IP")
@@ -846,14 +1192,6 @@ class InfoGathering:
             else:
                 print_warning("未找到NS服务器")
 
-        except dns.resolver.NoAnswer:
-            print_error("无法获取NS记录")
-        except dns.resolver.NXDOMAIN:
-            print_error(f"域名 {self.domain} 不存在")
-        except dns.resolver.Timeout:
-            print_warning("DNS查询超时")
-        except dns.exception.DNSException as e:
-            print_error(f"DNS解析失败: {e}")
         except Exception as e:
             print_error(f"DNS区域传输检测异常: {e}")
 
@@ -1401,8 +1739,7 @@ class InfoGathering:
                             print_info(f"    ... 还有 {len(cert_info['san']) - 5} 个")
 
                     # 检查证书是否过期
-                    from datetime import datetime, timezone
-                    now = datetime.now(timezone.utc)
+                    now = datetime.now().astimezone()
                     if cert_obj.not_valid_after_utc < now:
                         print_error("  证书已过期!")
                     elif (cert_obj.not_valid_after_utc - now).days < 30:
@@ -1795,7 +2132,6 @@ class InfoGathering:
         print_section("Shodan查询")
 
         if api_key is None:
-            import os
             api_key = os.environ.get('SHODAN_API_KEY', '')
 
         if not api_key:
